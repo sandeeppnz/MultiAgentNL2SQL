@@ -720,5 +720,87 @@ C5	FusionConfidenceAgent	Weighted fusion of all signals
 
 
 8️⃣ Multi-Agent Orchestrator
+Selector Agents → Generation Agents → Validator Agents → Repair Agents → Confidence Agent
+
+⭐ Orchestrator Responsibilities
+
+The orchestrator is responsible for:
+
+1. Build schema-aware context
+
+using SchemaLoader, SchemaGraph, PathResolver
+
+2. Run table selection agents
+
+to determine candidate tables
+
+**3. Run all G1–G7 SQL generation agents in parallel
+
+with schema-aware prompts
+
+4. Run semantic + structural validation
+
+using validator agents
+
+5. Run repair agents R8–R10 (or all R1–R10 if enabled)
+
+OpenAI repair loop preferred
+
+6. Run confidence agents
+
+to score SQL candidates
+
+7. Pick best SQL
+
+based on weighted confidence score
+
+8. Return SQL + diagnostics
+
+(best SQL + fallback list + scores)
+
+
+🔥 What the Token Reduction Engine Must Do
+✔ Reduce schema text safely
+
+No loss of critical join/key info.
+
+✔ Summarize tables
+
+Shorten column lists while preserving key attributes.
+
+✔ Compress join paths
+
+Only include paths relevant to selected tables.
+
+✔ Remove irrelevant tables
+
+Tables not selected by selection agents should be excluded.
+
+✔ Compress dimensions
+
+E.g., DimProduct has 25+ columns — do not dump them all.
+
+✔ Cap token usage
+
+Ensure prompts always stay under model limits.
+
+✔ Summarize with a small LLM (optional)
+
+Use LLaMA 3 8B or GPT-4o-mini for auto summarization.
+
+✔ Deterministic fallback
+
+Rule-based compression if LLM compression disabled.
+
+⭐ We will implement a 3-layer Token Reduction Engine:
+core/token_reducer/
+    ├── reducer.py               # main compression pipeline
+    ├── table_summarizer.py      # compress column lists + PK/FK metadata
+    ├── join_path_summarizer.py  # compress join paths
+    ├── llm_compressor.py        # optional: LLM summarization layer
+
+
+This gives flexibility + reliability.
+
 8️⃣ UI Integration (Streamlit) (optional, at the end)
 
