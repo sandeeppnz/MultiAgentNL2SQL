@@ -680,6 +680,44 @@ Multi-agent consensus
 Confidence scoring
 
 Confidence Engine
+Confidence scoring is essential for:
+
+picking the best SQL
+
+fallback selection
+
+safety
+
+evaluation
+
+reliability
+
+reporting confidence to UI
+
+internal debugging
+⭐ The Five Confidence Agents
+Code	Name	Purpose
+C1	StructuralConfidenceAgent	AST-level correctness + structure quality
+C2	SemanticConfidenceAgent	Meaning alignment using validator agents
+C3	ValidatorConfidenceAgent	Aggregates all validator results
+C4	SimilarityConfidenceAgent	Embedding-based similarity to gold SQL (if available) or canonical examples
+C5	FusionConfidenceAgent	Weighted fusion of all signals
+
+🔥 What the Confidence Layer Enables
+✔ Rank SQL candidates
+
+(G1–G7 output → pick best)
+
+✔ Measure generation quality
+✔ Evaluate repair success
+
+(choose best repaired SQL)
+
+✔ Provide confidence scores to user
+✔ Trainable calibration in the future
+✔ RLHF-style self-play evaluation later
+✔ Boosts accuracy massively
+
 
 8️⃣ Multi-Agent Orchestrator
 8️⃣ UI Integration (Streamlit) (optional, at the end)
