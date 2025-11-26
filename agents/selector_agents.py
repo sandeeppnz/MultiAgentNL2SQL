@@ -1,0 +1,1 @@
+"""Table selector agents scaffold."""
