@@ -455,30 +455,112 @@ llm/
 
 
 2️⃣ Agent Abstract Classes (Interfaces)
-✔ BaseAgent
-The root interface for all agents.
-
-✔ BaseGenerationAgent
-For G1–G5 parallel SQL generation agents (GPT-4.1-mini variants).
-
-✔ BaseRepairAgent
-For R1–R7 repair agents (local SLM agents like LLaMA/Qwen/Mistral).
-
-✔ BaseSelectorAgent
-For semantic, heuristic, and graph table selectors.
-
-✔ BaseValidatorAgent
-For semantic intent validation.
+✔ BaseAgent → The root interface for all agents.
+✔ BaseGenerationAgent → For G1–G5 parallel SQL generation agents (GPT-4.1-mini variants).
+✔ BaseRepairAgent → For R1–R7 repair agents (local SLM agents like LLaMA/Qwen/Mistral).
+✔ BaseSelectorAgent → For semantic, heuristic, and graph table selectors.
+✔ BaseValidatorAgent → For semantic intent validation.
 
 
 3️⃣ Selector Agents
-
-
+✔ SemanticSelectorAgent → Ready for embedding model later
+✔ HeuristicSelectorAgent → Baseline rule-based selector
+✔ GraphSelectorAgent → Uses schema graph connectivity
+✔ FusionSelectorAgent → Weighted ensemble
 
 
 4️⃣ SQL Generation Agents
+
+You will get 5 generation agents, each using a different prompting strategy:
+
+Agent	Strategy	Purpose
+G1	Deterministic template	Most reliable, strict structure
+G2	Soft template	Allows creativity for ambiguous queries
+G3	Join-heavy template	Forces explicit joins / schema adherence
+G4	Minimal prompt	Stress test prompting; gives alternative structure
+G5	Canonical style	Produces sqlglot-friendly canonical SQL
+
+These 5 agents will be run in parallel by the orchestrator.
+Whichever produces the highest validated SQL wins.
+
+✔ DeterministicGenerator
+✔ SoftTemplateGenerator
+✔ JoinHeavyGenerator
+✔ MinimalGenerator
+✔ CanonicalGenerator
+
+🧠 Why SQL Generation Agents Use llm.openai.acomplete()
+
+Because SQL generation is the hardest part of the entire NL→SQL pipeline, and it requires serious reasoning:
+
+selecting correct dims
+
+selecting correct fact table
+
+choosing correct grain
+
+applying correct joins
+
+avoiding hallucinated columns
+
+applying grouping rules
+
+interpreting the question correctly
+
+These tasks need a high-intelligence model → GPT-4.1-mini (or GPT-4/o1/o3).
+
+SLMs (local Ollama models) are not reliable enough for SQL generation:
+
+❌ skip required tables
+❌ get joins wrong
+❌ hallucinate missing columns
+❌ hallucinate measures
+❌ fail complex queries
+❌ cannot follow strict SQL Server rules
+
+That’s why every production-grade NL→SQL system uses a large model for generation, not small ones.
+
+So:
+
+✔ SQL generation = GPT-4.1-mini
+✔ SQL repair = local SLMs (Ollama)
+✔ SQL validation = deterministic
+✔ Table selection = mixed (embeddings + heuristic + SLM optional)
+
+▶ G6: LocalMinimalSLMGenerator
+
+Minimal prompt
+
+Very small instructions
+
+Useful for alternative structure patterns
+
+Very cheap + fast (50–150ms)
+
+▶ G7: LocalCanonicalSLMGenerator
+
+Forces canonical SQL output
+
+Works well with LLaMA/Qwen for simpler queries
+
+
 5️⃣ Validation Agents
+
+
 6️⃣ Repair Agents
+
+SQL Repair Agents (R1–R7)
+These are:
+Agent	Purpose
+R1	GrammarFixAgent
+R2	JoinRepairAgent
+R3	ColumnFixAgent
+R4	GroupByRepairAgent
+R5	DimCompletionAgent
+R6	ASTCanonicalRepairAgent
+R7	SemanticRepairAgent
+
+
 7️⃣ Multi-Agent Orchestrator
 8️⃣ UI Integration (Streamlit) (optional, at the end)
 
