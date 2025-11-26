@@ -5,27 +5,10 @@ from core.config import settings
 
 class SchemaLoader:
     """
-    Loads schema metadata from SQL Server via SQLAlchemy+pyodbc.
-
-    Produces a Python dictionary describing:
-      - columns
-      - primary keys
-      - foreign key mappings
-
-    Output
-        {
-            "FactInternetSales": {
-                "columns": [...],
-                "primary_key": "...",
-                "foreign_keys": {
-                    "ProductKey": "DimProduct",
-                    "CustomerKey": "DimCustomer"
-                }
-            },
-        ...
-        }
-
-
+    Loads detailed schema metadata including:
+    - columns
+    - PK constraints
+    - FK constraints (multi-column-aware)
     """
 
     def __init__(self):
@@ -36,29 +19,30 @@ class SchemaLoader:
         schema = {}
 
         for table in insp.get_table_names():
-            cols = insp.get_columns(table)
+            columns = insp.get_columns(table)
 
-            pk = None
-            try:
-                pks = insp.get_pk_constraint(table).get("constrained_columns", [])
-                pk = pks[0] if pks else None
-            except Exception:
-                pk = None
+            # Primary key (support composite keys)
+            pk_info = insp.get_pk_constraint(table)
+            primary_keys = pk_info.get("constrained_columns", []) or []
 
-            fk_map = {}
-            try:
-                for fk in insp.get_foreign_keys(table):
-                    col = fk.get("constrained_columns", [None])[0]
-                    ref_table = fk.get("referred_table")
-                    if col and ref_table:
-                        fk_map[col] = ref_table
-            except Exception:
-                pass
+            # Foreign keys (support composite FKs)
+            fk_info = insp.get_foreign_keys(table)
+            foreign_keys = []
+            for fk in fk_info:
+                constrained_cols = fk.get("constrained_columns", [])
+                referred_table = fk.get("referred_table", None)
+                referred_cols = fk.get("referred_columns", []) or []
+
+                foreign_keys.append({
+                    "constrained_columns": constrained_cols,
+                    "referred_table": referred_table,
+                    "referred_columns": referred_cols
+                })
 
             schema[table] = {
-                "columns": [c["name"] for c in cols],
-                "primary_key": pk,
-                "foreign_keys": fk_map
+                "columns": [c["name"] for c in columns],
+                "primary_keys": primary_keys,
+                "foreign_keys": foreign_keys
             }
 
         return schema
