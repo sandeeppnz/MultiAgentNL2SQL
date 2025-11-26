@@ -455,7 +455,27 @@ llm/
 
 
 2️⃣ Agent Abstract Classes (Interfaces)
+✔ BaseAgent
+The root interface for all agents.
+
+✔ BaseGenerationAgent
+For G1–G5 parallel SQL generation agents (GPT-4.1-mini variants).
+
+✔ BaseRepairAgent
+For R1–R7 repair agents (local SLM agents like LLaMA/Qwen/Mistral).
+
+✔ BaseSelectorAgent
+For semantic, heuristic, and graph table selectors.
+
+✔ BaseValidatorAgent
+For semantic intent validation.
+
+
 3️⃣ Selector Agents
+
+
+
+
 4️⃣ SQL Generation Agents
 5️⃣ Validation Agents
 6️⃣ Repair Agents
