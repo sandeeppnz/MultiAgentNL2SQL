@@ -395,3 +395,70 @@ parallel orchestrations
 
 ✔ It reflects the multi-agent, multi-LLM, multi-repair, parallel execution design
 
+
+
+ultimate_nl2sql_optionC_arch/
+│
+├── api/
+│   ├── main.py
+│   ├── routers/
+│   └── models/
+│
+├── agents/
+│   ├── generation_agents.py      # parallel GPT-4.1-mini variants
+│   ├── repair_agents.py          # local SLM repair workers
+│   ├── selector_agents.py        # multi-agent table selectors
+│   └── validator_agents.py       # semantic validation agents
+│
+├── core/
+│   ├── agent.py                  # orchestrator scaffold
+│   ├── config.py
+│   │
+│   ├── utils/
+│   ├── schema_graph/
+│   ├── ast_guardrails/
+│   ├── table_selection/
+│   ├── sql_generation/
+│   ├── sql_validation/
+│   ├── sql_repair/
+│   └── confidence/
+│
+├── llm/                          # LLM wrapper layer
+│
+├── frontend/
+│   └── app.py                    # Streamlit UI scaffold
+│
+└── README.md
+
+
+multiple SQL generators (G1, G2, G3, G4, G5)
+
+multiple repair agents (R1–R7)
+
+multiple table selector agents
+
+multiple validator agents
+
+parallel orchestrations
+
+
+
+1️⃣ Multi-LLM Client Layer (OpenAI + Ollama)
+
+llm/
+ ├── openai_client.py
+ ├── ollama_client.py
+ └── llm_manager.py   <-- orchestrates parallel calls & retry logic
+
+
+
+
+
+2️⃣ Agent Abstract Classes (Interfaces)
+3️⃣ Selector Agents
+4️⃣ SQL Generation Agents
+5️⃣ Validation Agents
+6️⃣ Repair Agents
+7️⃣ Multi-Agent Orchestrator
+8️⃣ UI Integration (Streamlit) (optional, at the end)
+

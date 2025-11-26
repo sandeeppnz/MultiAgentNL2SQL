@@ -1,0 +1,38 @@
+# --- Core Web Framework & API ---
+fastapi==0.115.0
+uvicorn==0.30.0
+pydantic==2.7.4
+pydantic-settings==2.3.4
+
+# --- Async HTTP (for OpenAI & Ollama) ---
+aiohttp==3.9.5
+httpx==0.27.0
+
+# --- SQL Parsing & AST ---
+sqlglot==23.4.1
+
+# --- Database: SQL Server (pyodbc + SQLAlchemy) ---
+SQLAlchemy==2.0.30
+pyodbc==5.1.0
+
+# --- Embeddings / Table Selection ---
+sentence-transformers==3.0.1
+faiss-cpu==1.8.0.post1
+
+# --- General NLP / Token Handling ---
+tiktoken==0.7.0
+
+# --- Concurrency / Server ---
+orjson==3.10.3
+
+# --- Frontend (Streamlit UI) ---
+streamlit==1.36.0
+
+# --- Optional (for caching / speed) ---
+cachetools==5.4.0
+
+# --- Optional Logging & Tracing ---
+loguru==0.7.2
+
+# --- Ollama client compatibility (optional) ---
+ollama==0.1.8
