@@ -637,7 +637,50 @@ R9: OpenAIJoinRepairAgent
 
 R10: OpenAISemanticRepairAgent
 
+7️⃣ Schema Graph Layer (schema_loader + graph + path_resolver)
+This layer gives your agents the ability to reason about join paths, identify fact/dim relationships, find required tables, and power multiple subsystems:
 
-7️⃣ Multi-Agent Orchestrator
+Selector Agents
+
+Repair Agents
+
+Validator Agents
+
+Orchestrator
+
+
+
+path_resolver.py
+Purpose:
+Compute join paths between two tables.
+Example:
+
+path_resolver.shortest_path("FactInternetSales", "DimProduct")
+→ ["FactInternetSales", "DimProduct"]
+
+
+Or more complex:
+
+path_resolver.shortest_path("FactInternetSales", "DimGeography")
+→ ["FactInternetSales", "DimCustomer", "DimGeography"]
+
+
+This is critical for:
+
+Repair Agents fixing JOIN chains
+
+Semantic validators
+
+Table selection expansion
+
+Orchestrator reasoning
+
+Multi-agent consensus
+
+Confidence scoring
+
+Confidence Engine
+
+8️⃣ Multi-Agent Orchestrator
 8️⃣ UI Integration (Streamlit) (optional, at the end)
 
