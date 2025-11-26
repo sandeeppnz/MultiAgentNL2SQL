@@ -11,35 +11,67 @@ from llm.llm_manager import LLMManager
 llm = LLMManager()
 
 
+def format_schema_context(context: dict) -> str:
+    schema_text = context.get("schema_text", "")
+    join_paths = context.get("join_paths", "")
+    columns = context.get("columns", {})
+    roles = context.get("role_map", {})
+
+    col_text = "\n".join(
+        f"{tbl}: {', '.join(cols)}" for tbl, cols in columns.items()
+    )
+
+    role_text = "\n".join(
+        f"{tbl}: {role}" for tbl, role in roles.items()
+    )
+
+    return f"""
+=== TABLES ===
+{context.get('tables')}
+
+=== COLUMNS ===
+{col_text}
+
+=== ROLES (fact/dimension) ===
+{role_text}
+
+=== JOIN PATHS ===
+{join_paths}
+
+=== FULL SCHEMA ===
+{schema_text}
+"""
+
+
 # ------------------------------------------------------------
 # G1 — Deterministic Template Generator
 # ------------------------------------------------------------
 
 class DeterministicGenerator(BaseGenerationAgent):
-    """
-    Very strict SQL prompting.
-    Minimal temperature, minimal creativity.
-    Used as baseline generator.
-    """
-
     async def generate(self, question: str, context: dict) -> str:
+        schema_block = format_schema_context(context)
+
         prompt = f"""
-You are a SQL expert. Generate ONLY valid SQL for Microsoft SQL Server.
-Use strict structure. No commentary.
+You are a SQL Server expert.
 
-Tables available: {context.get('tables')}
+Use ONLY the tables, columns, and JOIN relationships provided below.
 
-Question: {question}
+{schema_block}
 
-Rules:
-- Always join fact tables to corresponding dimension tables using keys.
-- Always include GROUP BY when aggregating.
-- Never hallucinate column names.
-- Never output explanations.
+Instructions:
+- DO NOT hallucinate any table or column.
+- Always use valid join keys based on the JOIN PATHS section.
+- Always alias tables.
+- Ensure GROUP BY when aggregating.
+- Use precise SQL Server syntax.
 
-Return ONLY SQL.
+Question:
+{question}
+
+Return ONLY the SQL.
 """
         return await llm.openai.acomplete(prompt, temperature=0.0)
+
 
 
 # ------------------------------------------------------------
@@ -47,25 +79,26 @@ Return ONLY SQL.
 # ------------------------------------------------------------
 
 class SoftTemplateGenerator(BaseGenerationAgent):
-    """
-    More flexible generator.
-    Allows some creativity to solve ambiguous questions.
-    """
-
     async def generate(self, question: str, context: dict) -> str:
+        schema_block = format_schema_context(context)
+
         prompt = f"""
-You are an expert SQL analyst.
+Generate SQL for SQL Server using the schema below:
 
-Generate SQL for the given question and tables:
-{context.get('tables')}
+{schema_block}
 
-Be concise and correct, but flexible in interpretation.
-Output ONLY SQL.
+Rules:
+- Use correct join keys.
+- Use only valid columns.
+- You may decide the best aggregation based on the question.
 
 Question:
 {question}
+
+Return ONLY SQL.
 """
         return await llm.openai.acomplete(prompt, temperature=0.2)
+
 
 
 # ------------------------------------------------------------
@@ -73,76 +106,20 @@ Question:
 # ------------------------------------------------------------
 
 class JoinHeavyGenerator(BaseGenerationAgent):
-    """
-    Forces explicit JOIN reasoning using schema.
-    This agent is crucial when questions involve relationships.
-    """
-
     async def generate(self, question: str, context: dict) -> str:
-        schema_text = context.get("schema_text", "")
+        schema_block = format_schema_context(context)
 
         prompt = f"""
-You are a SQL JOIN expert.
+You specialize in JOIN reasoning.
 
-You MUST write correct joins based on schema:
+Use the schema and join paths below:
 
-{schema_text}
+{schema_block}
 
-Instructions:
-- Always join fact → dimensions.
-- Use clear join conditions.
-- Do NOT omit any required join.
-
-Tables: {context.get('tables')}
-
-Generate SQL for:
-{question}
-
-Return ONLY SQL.
-"""
-        return await llm.openai.acomplete(prompt, temperature=0.0)
-
-
-# ------------------------------------------------------------
-# G4 — Minimal Prompt Generator
-# ------------------------------------------------------------
-
-class MinimalGenerator(BaseGenerationAgent):
-    """
-    Minimal prompt, very short instructions.
-    Helpful to produce alternative structures.
-    """
-
-    async def generate(self, question: str, context: dict) -> str:
-        prompt = f"""
-SQL only. SQL Server. Tables: {context.get('tables')}
-Question: {question}
-"""
-        return await llm.openai.acomplete(prompt, temperature=0.1)
-
-
-# ------------------------------------------------------------
-# G5 — Canonical Style Generator
-# ------------------------------------------------------------
-
-class CanonicalGenerator(BaseGenerationAgent):
-    """
-    Produces SQL in canonical formatting:
-    - explicit table aliases
-    - consistent SELECT layout
-    - sqlglot-friendly
-    """
-
-    async def generate(self, question: str, context: dict) -> str:
-        prompt = f"""
-Generate SQL in canonical formatting style.
-Always:
-- Use table aliases (f, d, p, c).
-- Place SELECT columns on separate lines.
-- Fully qualify columns.
-- Use JOIN ... ON lines clearly.
-
-Tables: {context.get('tables')}
+Rules:
+- ALWAYS join fact tables to dimension tables based on FK→PK mapping.
+- ALL joins MUST use exact key names from JOIN PATHS.
+- Fully qualify all columns using aliases.
 
 Question:
 {question}
@@ -152,27 +129,79 @@ Return ONLY SQL.
         return await llm.openai.acomplete(prompt, temperature=0.0)
 
 
+
+# ------------------------------------------------------------
+# G4 — Minimal Prompt Generator
+# ------------------------------------------------------------
+
+class MinimalGenerator(BaseGenerationAgent):
+    async def generate(self, question: str, context: dict) -> str:
+        schema_block = format_schema_context(context)
+
+        prompt = f"""
+SQL Server only.
+Tables and columns:
+{schema_block}
+
+Question:
+{question}
+
+SQL:
+"""
+        return await llm.openai.acomplete(prompt, temperature=0.1)
+
+
+
+# ------------------------------------------------------------
+# G5 — Canonical Style Generator
+# ------------------------------------------------------------
+
+class CanonicalGenerator(BaseGenerationAgent):
+    async def generate(self, question: str, context: dict) -> str:
+        schema_block = format_schema_context(context)
+
+        prompt = f"""
+Generate CANONICAL SQL.
+
+Schema:
+{schema_block}
+
+Rules:
+- Alias each table: a, b, c, d...
+- Use explicit JOIN ... ON with correct join keys.
+- Put each SELECT column on its own line.
+- Fully qualify all columns.
+
+Question:
+{question}
+
+Return ONLY canonical SQL.
+"""
+        return await llm.openai.acomplete(prompt, temperature=0.0)
+
+
+
 # ------------------------------------------------------------
 # G6 — Local Minimal SLM Generator
 # ------------------------------------------------------------
 
 class LocalMinimalSLMGenerator(BaseGenerationAgent):
-    """
-    EXPERIMENTAL:
-    Local SLM generation using Ollama.
-    Minimal instruction prompt.
-    Useful for cheap offline SQL alternatives.
-    """
-
     async def generate(self, question: str, context: dict) -> str:
-        prompt = f"""
-Write SQL (SQL Server syntax).
-Tables: {context.get('tables')}
-Question: {question}
+        schema_block = format_schema_context(context)
 
-Return ONLY SQL.
+        prompt = f"""
+Write valid SQL Server code.
+
+Schema:
+{schema_block}
+
+Question:
+{question}
+
+SQL:
 """
         return await llm.ollama.acomplete(prompt)
+
 
 
 # ------------------------------------------------------------
@@ -180,22 +209,23 @@ Return ONLY SQL.
 # ------------------------------------------------------------
 
 class LocalCanonicalSLMGenerator(BaseGenerationAgent):
-    """
-    EXPERIMENTAL:
-    Canonical SQL generation using local SLM (LLaMA/Qwen).
-    Produces stable, structured SQL with aliases.
-    """
-
     async def generate(self, question: str, context: dict) -> str:
-        prompt = f"""
-Produce SQL in canonical format:
-- include table aliases (a, b, c)
-- use explicit JOIN ... ON
-- break SELECT columns across lines
-- avoid extra commentary
+        schema_block = format_schema_context(context)
 
-Tables available: {context.get('tables')}
-Question: {question}
+        prompt = f"""
+Rewrite SQL in canonical SQL Server format.
+
+Schema:
+{schema_block}
+
+Rules:
+- Alias all tables
+- Use explicit JOIN ... ON
+- Use only valid columns
+- No hallucination allowed
+
+Question:
+{question}
 
 Return ONLY SQL.
 """
