@@ -9,7 +9,8 @@ aiohttp==3.9.5
 httpx==0.27.0
 
 # --- SQL Parsing & AST ---
-sqlglot==23.4.1
+# Pin to a version that still exists on PyPI; 23.4.1 was removed.
+sqlglot==23.17.0
 
 # --- Database: SQL Server (pyodbc + SQLAlchemy) ---
 SQLAlchemy==2.0.30
