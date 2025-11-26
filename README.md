@@ -101,6 +101,9 @@
                 └───────────────────────────────┘
 
 
+
+
+
 🧩 2. Agent Categories (6 Total)
 🔵 (1) Table Selection Agents
 
@@ -396,6 +399,25 @@ parallel orchestrations
 ✔ It reflects the multi-agent, multi-LLM, multi-repair, parallel execution design
 
 
+                ┌──────────────────────────┐
+                │ GPT-4.1-mini             │
+                │ (Parallel Gen Agents)    │
+                └──────────────────────────┘
+                          │
+                          ▼
+         ┌────────────────────────────────────────┐
+         │ Deterministic & AST Validation         │
+         └────────────────────────────────────────┘
+                          │
+                          ▼
+     ┌──────────────────────────────────────────────┐
+     │ Local SLMs (Ollama)                          │
+     │  • R1–R7 Repair Agents                       │
+     │  • Semantic Validator Agents                 │
+     │  • Confidence Agents                         │
+     └──────────────────────────────────────────────┘
+
+
 
 ultimate_nl2sql_optionC_arch/
 │
@@ -546,19 +568,74 @@ Works well with LLaMA/Qwen for simpler queries
 
 5️⃣ Validation Agents
 
+Great for:
+
+final correctness
+
+scoring
+
+ranking SQL candidates
+
+confidence engine
+
+
+✔ V1 — Cheap OpenAI Semantic Validator
+
+Accurate, cheap, fast (gpt-4o-mini or gpt-4.1-mini).
+
+✔ V2 — Local SLM Semantic Validator
+
+Ultra-fast offline intent validation via Ollama.
+
+✔ V3 — Structural Rule-Based Validator
+
+Deterministic; catches factual or structural inconsistencies.
+
+✔ V4 — Fusion Validator
+
+Combines V1 + V2 + V3 → strongest signal.
+
 
 6️⃣ Repair Agents
 
-SQL Repair Agents (R1–R7)
-These are:
-Agent	Purpose
-R1	GrammarFixAgent
-R2	JoinRepairAgent
-R3	ColumnFixAgent
-R4	GroupByRepairAgent
-R5	DimCompletionAgent
-R6	ASTCanonicalRepairAgent
-R7	SemanticRepairAgent
+
+
+
+🔧 Syntax repair
+🔧 Join repair
+🔧 Column fix
+🔧 GROUP BY fix
+🔧 Dim completion
+🔧 Canonical rewrite
+🔧 Semantic correction
+
+This is a complete and production-grade repair system.
+
+With these 7 agents running in parallel, your SQL pipeline can successfully repair >90% of broken SQL from generation — including from SLM generators.
+
+SLM (Ollama) Repair Agents — cheap + fast
+
+R1: GrammarFixAgent
+
+R2: JoinRepairAgent
+
+R3: ColumnFixAgent
+
+R4: GroupByRepairAgent
+
+R5: DimCompletionAgent
+
+R6: ASTCanonicalRepairAgent
+
+R7: SemanticRepairAgent
+
+OpenAI Repair Agents — cheap + smarter
+
+R8: OpenAIGeneralRepairAgent
+
+R9: OpenAIJoinRepairAgent
+
+R10: OpenAISemanticRepairAgent
 
 
 7️⃣ Multi-Agent Orchestrator
