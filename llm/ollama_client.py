@@ -4,8 +4,8 @@ import asyncio
 from core.config import settings
 
 class OllamaClient:
-    def __init__(self, model: str = "llama3", timeout: int = 20):
-        self.model = model
+    def __init__(self, model: str | None = None, timeout: int = 20):
+        self.model = model or settings.OLLAMA_MODEL
         self.url = f"{settings.OLLAMA_HOST}/api/generate"
         self.timeout = timeout
 

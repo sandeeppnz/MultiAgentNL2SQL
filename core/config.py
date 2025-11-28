@@ -11,6 +11,7 @@ class settings:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     OPENAI_API_BASE = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1/")  # optional override
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "")
     DATABASE_URL = os.getenv("DATABASE_URL","")
 
 
