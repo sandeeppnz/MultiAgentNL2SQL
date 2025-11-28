@@ -1,15 +1,17 @@
+import os
+
+
 class settings:
     # 1. “OpenAI-only mode” for cloud deployment
-    USE_SLM_REPAIR = False           
-    ENABLE_SLM_GENERATORS = False     
+    USE_SLM_REPAIR = os.getenv("USE_SLM_REPAIR", "False").lower() == "true"
 
+    ENABLE_SLM_GENERATORS =  os.getenv("ENABLE_SLM_GENERATORS", "False").lower() == "true"
 
-    # 2. “Hybrid mode” for max accuracy and cost savings
-    # USE_SLM_REPAIR = True            
-    # ENABLE_SLM_GENERATORS = True    
-    # OPENAI=False (optional)
-
-    OLLAMA_HOST="http://localhost:11434"
+    # API credentials / endpoints
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_API_BASE = os.getenv("OPENAI_API_BASE")  # optional override
+    OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    DATABASE_URL = os.getenv("DATABASE_URL","")
 
 
 # USE_SLM_REPAIR=False

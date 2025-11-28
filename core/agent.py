@@ -54,11 +54,20 @@ class NL2SQLOrchestrator:
         # ----------------------------
         # selector agents
         # ----------------------------
+        semantic_selector = SemanticSelectorAgent()
+        heuristic_selector = HeuristicSelectorAgent()
+        graph_selector = GraphSelectorAgent()
+        fusion_selector = FusionSelectorAgent(
+            semantic=semantic_selector,
+            heuristic=heuristic_selector,
+            graph=graph_selector,
+        )
+
         self.selector_agents = [
-            SemanticSelectorAgent(),
-            HeuristicSelectorAgent(),
-            GraphSelectorAgent(),
-            FusionSelectorAgent()
+            semantic_selector,
+            heuristic_selector,
+            graph_selector,
+            fusion_selector,
         ]
 
         # ----------------------------
@@ -175,14 +184,13 @@ class NL2SQLOrchestrator:
 
     async def _select_tables(self, question: str):
         results = await asyncio.gather(*[
-            agent.select(question) for agent in self.selector_agents
+            agent.select(question, self.schema)
+            for agent in self.selector_agents
         ])
 
-        # flatten and dedup
         tables = set()
-        for r in results:
-            for t in r:
-                tables.add(t)
+        for result in results:
+            tables.update(result.get("tables", []))
 
         return list(tables)
 
