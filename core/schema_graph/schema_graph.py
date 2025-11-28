@@ -1,24 +1,46 @@
 # core/schema_graph/schema_graph.py
 
 from collections import defaultdict
+from typing import List, Dict
+
 
 class SchemaGraph:
     """
-    Advanced graph representation of database schema:
-    - tracks FK edges with column mappings
-    - differentiates fact vs dimension tables
+    Robust schema graph for NL→SQL join inference.
+
+    Tracks:
+    - forward FK edges (A → B)
+    - reverse FK edges (B ← A)
+    - fact/dimension roles
     """
 
     def __init__(self, schema: dict):
         self.schema = schema
-        self.graph = self._build_graph()
-        self.reverse = self._build_reverse_map()
+
+        # full directional edges
+        self.forward_edges = self._build_forward_graph()
+        self.reverse_edges = self._build_reverse_graph()
+
+        # roles: fact / dimension / other
         self.roles = self._detect_roles()
 
-    def _build_graph(self):
+    # ============================================================
+    # GRAPH CONSTRUCTION
+    # ============================================================
+
+    def _build_forward_graph(self):
         """
-        Build directional graph:
-          table A --fk(A.col -> B.pk)--> table B
+        Build directed FK graph:
+          A --(A.fk → B.pk)--> B
+
+        Structure:
+        forward_edges[A] = [
+            {
+                "to": B,
+                "fk_cols": [...],
+                "pk_cols": [...],
+            }
+        ]
         """
         g = defaultdict(list)
 
@@ -28,31 +50,48 @@ class SchemaGraph:
 
                 g[table].append({
                     "to": ref,
-                    "constrained_columns": fk["constrained_columns"],
-                    "referred_columns": fk["referred_columns"]
+                    "fk_cols": fk["constrained_columns"],
+                    "pk_cols": fk["referred_columns"],
                 })
 
         return g
 
-    def _build_reverse_map(self):
+    def _build_reverse_graph(self):
         """
-        Reverse lookup:
-          dimension table → list of fact tables referencing it
+        Reverse FK graph:
+          B ← A  (A references B)
+
+        Structure:
+        reverse_edges[B] = [
+            {
+                "from": A,
+                "fk_cols": [...],
+                "pk_cols": [...],
+            }
+        ]
         """
         r = defaultdict(list)
 
-        for table, edges in self.graph.items():
+        for a, edges in self.forward_edges.items():
             for edge in edges:
-                r[edge["to"]].append(table)
+                b = edge["to"]
+                r[b].append({
+                    "from": a,
+                    "fk_cols": edge["fk_cols"],
+                    "pk_cols": edge["pk_cols"],
+                })
 
         return r
 
+    # ============================================================
+    # FACT / DIMENSION ROLE DETECTION
+    # ============================================================
+
     def _detect_roles(self):
         """
-        Heuristic: Fact tables typically:
-        - start with 'Fact'
-        Dimension tables:
-        - start with 'Dim'
+        Simple heuristic:
+          - startswith("Fact") → fact
+          - startswith("Dim") → dimension
         """
         roles = {}
 
@@ -68,49 +107,63 @@ class SchemaGraph:
 
         return roles
 
-    # -----------------------------
-    # public API
-    # -----------------------------
+    # ============================================================
+    # PUBLIC API
+    # ============================================================
 
-    def neighbors(self, table: str):
-        """Return tables reachable from table via FK edges."""
-        return [edge["to"] for edge in self.graph.get(table, [])]
+    def neighbors(self, table: str) -> List[str]:
+        """
+        Outbound FK neighbors.
+        A → B
+        """
+        return [edge["to"] for edge in self.forward_edges.get(table, [])]
 
-    def reverse_neighbors(self, table: str):
-        """Tables referencing this table."""
-        return self.reverse.get(table, [])
+    def reverse_neighbors(self, table: str) -> List[str]:
+        """
+        Inbound FK neighbors.
+        B ← A
+        """
+        return [edge["from"] for edge in self.reverse_edges.get(table, [])]
 
-    def table_role(self, table: str):
+    def table_role(self, table: str) -> str:
         """Return: fact, dimension, or other."""
         return self.roles.get(table, "other")
 
+    # ============================================================
+    # JOIN KEY LOOKUP
+    # ============================================================
+
     def join_keys(self, table_a: str, table_b: str):
         """
-        Return join key mapping between two connected tables.
-        Output:
-          {
-             "a_col": "ProductKey",
-             "b_col": "ProductKey"
-          }
+        Return join key mapping, fully directional.
+
+        Output structure:
+        {
+            "from": table_with_fk,
+            "to": table_with_pk,
+            "constrained": [...],
+            "referred": [...],
+        }
         """
-        # outbound FK
-        for edge in self.graph.get(table_a, []):
+
+        # Case 1: A → B (A has FK)
+        for edge in self.forward_edges.get(table_a, []):
             if edge["to"] == table_b:
                 return {
                     "from": table_a,
                     "to": table_b,
-                    "constrained": edge["constrained_columns"],
-                    "referred": edge["referred_columns"]
+                    "constrained": edge["fk_cols"],
+                    "referred": edge["pk_cols"],
                 }
 
-        # inbound FK (reverse edge)
-        for edge in self.graph.get(table_b, []):
+        # Case 2: B → A (B has FK)
+        for edge in self.forward_edges.get(table_b, []):
             if edge["to"] == table_a:
                 return {
                     "from": table_b,
                     "to": table_a,
-                    "constrained": edge["constrained_columns"],
-                    "referred": edge["referred_columns"]
+                    "constrained": edge["fk_cols"],
+                    "referred": edge["pk_cols"],
                 }
 
         return None

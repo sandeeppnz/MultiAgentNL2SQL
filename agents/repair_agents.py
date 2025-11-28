@@ -1,331 +1,260 @@
 """
-SQL Repair Agents (R1–R7)
-Each agent attempts a different style of repair on invalid SQL.
-All agents inherit from BaseRepairAgent.
+SQL Repair Agents (R1–R10)
+All repair agents now use the centralized PromptBuilder.
+
+This ensures:
+ - unified guardrails
+ - consistent schema context
+ - join correctness
+ - fact/dimension awareness
+ - no hallucination of tables/columns
 """
 
 from agents.base import BaseRepairAgent
+from core.prompt_builder import PromptBuilder
 from llm.llm_manager import LLMManager
 
 llm = LLMManager()
+builder = PromptBuilder()
 
 
-# ------------------------------------------------------------
+# ============================================================
+# HELPER — Build unified repair prompt
+# ============================================================
+
+def build_repair_prompt(sql: str, diagnostics: dict, instruction: str) -> str:
+    """
+    Wraps any repair instruction inside the unified schema-aware prompt.
+    This ensures:
+        - correct schema context
+        - correct join paths
+        - guardrails
+        - consistent formatting
+    """
+
+    question = diagnostics.get("question", "")
+    schema_text = diagnostics.get("schema_text", "")
+    summary = diagnostics.get("summary", "")
+    join_paths = diagnostics.get("join_paths", "")
+
+    # Build a minimal context for repair
+    context = {
+        "tables": diagnostics.get("tables", []),
+        "columns": diagnostics.get("columns", {}),
+        "role_map": diagnostics.get("roles", {}),
+        "schema_text": schema_text,
+        "summary": summary,
+        "join_paths": join_paths,
+    }
+
+    # Inject repair-specific instruction
+    base_prompt = builder.build(question, context, mode="canonical")
+
+    return f"""
+{base_prompt}
+
+# ========================
+# SQL TO REPAIR
+# ========================
+{sql}
+
+# ========================
+# REPAIR INSTRUCTION
+# ========================
+{instruction}
+
+Return ONLY the corrected SQL. Do not explain.
+""".strip()
+
+
+# ============================================================
 # R1 — Grammar Fix Agent
-# ------------------------------------------------------------
+# ============================================================
 
 class GrammarFixAgent(BaseRepairAgent):
-    """
-    Fixes SQL syntax, missing commas, misplaced keywords,
-    invalid SELECT/FROM patterns, etc.
-    """
-
     async def repair(self, sql: str, diagnostics: dict) -> str:
-        prompt = f"""
-You are a SQL syntax repair assistant.
+        instruction = """
+Fix ONLY SQL syntax errors:
+ - missing commas
+ - unmatched parentheses
+ - invalid SELECT/FROM/WHERE structure
+ - malformed JOIN clauses
 
-Fix ONLY syntax issues in the following SQL:
-{sql}
-
-Do NOT change table names.
-Do NOT change column names.
-Do NOT add new joins.
-
-Return ONLY repaired SQL.
+Do NOT change table names, column names, or add/remove joins.
 """
+        prompt = build_repair_prompt(sql, diagnostics, instruction)
         return await llm.ollama.acomplete(prompt)
 
 
-# ------------------------------------------------------------
+# ============================================================
 # R2 — Join Repair Agent
-# ------------------------------------------------------------
+# ============================================================
 
 class JoinRepairAgent(BaseRepairAgent):
-    """
-    Adds missing JOINs using schema information.
-    Ensures fact/dim relationships are properly connected.
-    """
-
     async def repair(self, sql: str, diagnostics: dict) -> str:
-        schema_text = diagnostics.get("schema_text", "")
-
-        prompt = f"""
-You are a SQL join-fixing expert.
-
-The following SQL has missing or incorrect JOINs:
-{sql}
-
-Schema:
-{schema_text}
-
-Fix JOIN issues:
-- Add missing JOIN ... ON
-- Correct join keys
-- Do NOT remove existing tables
-
-Return ONLY corrected SQL.
+        instruction = """
+Fix incorrect or missing JOINs using the schema.
+Rules:
+ - Add missing JOIN ... ON clauses
+ - Use ONLY FK → PK join paths from schema
+ - Do NOT remove existing tables
+ - Ensure all alias references are valid
 """
+        prompt = build_repair_prompt(sql, diagnostics, instruction)
         return await llm.ollama.acomplete(prompt)
 
 
-# ------------------------------------------------------------
+# ============================================================
 # R3 — Column Fix Agent
-# ------------------------------------------------------------
+# ============================================================
 
 class ColumnFixAgent(BaseRepairAgent):
-    """
-    Fixes column name mismatches.
-    Replaces invalid columns with correct ones from schema.
-    """
-
     async def repair(self, sql: str, diagnostics: dict) -> str:
-        available_cols = diagnostics.get("columns", [])
-
-        prompt = f"""
-Fix column names in this SQL:
-{sql}
-
-Available columns:
-{available_cols}
-
+        instruction = """
+Fix invalid or misspelled column names.
 Rules:
-- Replace invalid columns with closest valid ones.
-- Do NOT remove tables.
-- Do NOT change SQL logic.
-
-Return ONLY SQL.
+ - Replace only incorrect columns with valid ones from schema
+ - Do NOT hallucinate new columns
+ - Preserve the SQL logic
 """
+        prompt = build_repair_prompt(sql, diagnostics, instruction)
         return await llm.ollama.acomplete(prompt)
 
 
-# ------------------------------------------------------------
+# ============================================================
 # R4 — GroupBy Repair Agent
-# ------------------------------------------------------------
+# ============================================================
 
 class GroupByRepairAgent(BaseRepairAgent):
-    """
-    Ensures GROUP BY is correct:
-    - If aggregate functions exist, GROUP BY matching columns must exist.
-    """
-
     async def repair(self, sql: str, diagnostics: dict) -> str:
-        prompt = f"""
-The following SQL has GROUP BY issues:
-{sql}
-
-Fix GROUP BY:
-- Include all non-aggregated columns.
-- Do NOT remove aggregates.
-- Do NOT change table structure.
-
-Return ONLY corrected SQL.
+        instruction = """
+Fix GROUP BY usage:
+ - Include all non-aggregated columns in SELECT
+ - Do NOT remove aggregates
+ - Maintain exact table aliases and logic
 """
+        prompt = build_repair_prompt(sql, diagnostics, instruction)
         return await llm.ollama.acomplete(prompt)
 
 
-# ------------------------------------------------------------
+# ============================================================
 # R5 — Dim Completion Agent
-# ------------------------------------------------------------
+# ============================================================
 
 class DimCompletionAgent(BaseRepairAgent):
-    """
-    Adds missing dimension tables based on:
-    - schema graph
-    - fact table relationships
-    - column usage
-    """
-
     async def repair(self, sql: str, diagnostics: dict) -> str:
-        schema_text = diagnostics.get("schema_text", "")
-
-        prompt = f"""
-The following SQL is missing required dimension tables:
-{sql}
-
-Use schema to add missing JOINs to dimension tables:
-{schema_text}
-
+        instruction = """
+Add missing dimension tables based on schema graph.
 Rules:
-- Do NOT remove existing tables.
-- Only add required dimension tables.
-- Ensure join keys are correct.
-
-Return ONLY SQL.
+ - Insert missing FK → PK joins
+ - Do NOT remove existing tables
+ - Use correct join keys from schema
 """
+        prompt = build_repair_prompt(sql, diagnostics, instruction)
         return await llm.ollama.acomplete(prompt)
 
 
-# ------------------------------------------------------------
+# ============================================================
 # R6 — AST Canonical Repair Agent
-# ------------------------------------------------------------
+# ============================================================
 
 class ASTCanonicalRepairAgent(BaseRepairAgent):
-    """
-    Rewrites SQL into canonical AST format:
-    - normalized SELECT
-    - explicit JOINs
-    - consistent aliases
-    - stable ordering
-    """
-
     async def repair(self, sql: str, diagnostics: dict) -> str:
-        prompt = f"""
-Rewrite the SQL below into canonical SQL format
-while keeping identical logic:
-
-{sql}
-
+        instruction = """
+Rewrite SQL into canonical SQL Server format WITHOUT altering logic.
 Rules:
-- Use explicit JOIN ... ON
-- Use consistent table aliases (a, b, c)
-- Fully qualify columns
-- No commentary
-
-Return ONLY canonical SQL.
+ - Explicit JOIN ... ON only
+ - Use consistent short aliases (a, b, c)
+ - Fully qualify columns (alias.column)
+ - No comments, no explanations
 """
+        prompt = build_repair_prompt(sql, diagnostics, instruction)
         return await llm.ollama.acomplete(prompt)
 
 
-# ------------------------------------------------------------
+# ============================================================
 # R7 — Semantic Repair Agent
-# ------------------------------------------------------------
+# ============================================================
 
 class SemanticRepairAgent(BaseRepairAgent):
-    """
-    Ensures SQL semantically matches the question.
-    Fixes missing filters, wrong grain, incorrect aggregations.
-    """
-
     async def repair(self, sql: str, diagnostics: dict) -> str:
         question = diagnostics.get("question", "")
-
-        prompt = f"""
-The SQL below does NOT correctly answer the question:
+        instruction = f"""
+The SQL does NOT correctly answer the question:
 
 Question:
 {question}
 
-SQL:
-{sql}
-
-Fix the SQL so that it answers the question exactly.
-Do NOT change schema.
-Do NOT add hallucinated columns.
-
-Return ONLY SQL.
+Fix the SQL so that the answer matches the intent EXACTLY.
+Rules:
+ - Use ONLY valid tables and columns
+ - No hallucinations
+ - No missing filters
+ - No missing joins
+ - No incorrect grain or aggregation
 """
+        prompt = build_repair_prompt(sql, diagnostics, instruction)
         return await llm.ollama.acomplete(prompt)
 
 
-
-# ------------------------------------------------------------
-# R8 — General OpenAI Repair Agent
-# ------------------------------------------------------------
+# ============================================================
+# R8 — OpenAI General Repair Agent
+# ============================================================
 
 class OpenAIGeneralRepairAgent(BaseRepairAgent):
-    """
-    OpenAI mini model general repair.
-    Capable of deeper reasoning than SLMs.
-    Handles:
-      - missing columns
-      - missing filters
-      - incorrect aggregations
-      - subtle logic fixes
-    """
-
     async def repair(self, sql: str, diagnostics: dict) -> str:
         question = diagnostics.get("question", "")
-        schema_text = diagnostics.get("schema_text", "")
-
-        prompt = f"""
-The following SQL contains issues and does not fully answer the question.
+        instruction = f"""
+Fix ALL issues in SQL:
+ - syntax errors
+ - incorrect columns
+ - incorrect joins
+ - missing filters
+ - wrong aggregations
+ - wrong fact/dimension tables
 
 Question:
 {question}
-
-SQL:
-{sql}
-
-Schema:
-{schema_text}
-
-Fix ALL issues:
-- syntax
-- missing columns
-- incorrect joins
-- missing filters
-- wrong aggregation/grain
-- wrong fact table
-
-Return ONLY the repaired SQL.
 """
-
+        prompt = build_repair_prompt(sql, diagnostics, instruction)
         return await llm.openai.acomplete(prompt, temperature=0)
 
 
-# ------------------------------------------------------------
+# ============================================================
 # R9 — OpenAI Join Reasoning Repair Agent
-# ------------------------------------------------------------
+# ============================================================
 
 class OpenAIJoinRepairAgent(BaseRepairAgent):
-    """
-    Uses GPT-4o-mini or GPT-4.1-mini to deeply reason about join paths.
-    Picks correct dimension tables and FK relationships.
-    deeper reasoning
-    """
-
     async def repair(self, sql: str, diagnostics: dict) -> str:
-        schema_text = diagnostics.get("schema_text", "")
-
-        prompt = f"""
-The SQL below has incorrect or missing JOINs:
-
-SQL:
-{sql}
-
-Fix JOINs using the schema below:
-{schema_text}
-
+        instruction = """
+Fix JOIN logic using schema join paths.
 Rules:
-- Add missing join tables.
-- Use correct join keys.
-- Do not remove necessary joins.
-- Maintain SQL Server syntax.
-
-Return ONLY corrected SQL.
+ - Add missing joins
+ - Repair incorrect join keys
+ - Preserve SQL Server syntax
 """
-
+        prompt = build_repair_prompt(sql, diagnostics, instruction)
         return await llm.openai.acomplete(prompt, temperature=0)
 
 
-# ------------------------------------------------------------
+# ============================================================
 # R10 — OpenAI Semantic Repair Agent
-# ------------------------------------------------------------
+# ============================================================
 
 class OpenAISemanticRepairAgent(BaseRepairAgent):
-    """
-    High-level semantic repair.
-    Ensures SQL exactly answers the question's intent.
-    high-level reasoning
-    """
-
     async def repair(self, sql: str, diagnostics: dict) -> str:
         question = diagnostics.get("question", "")
-
-        prompt = f"""
-The SQL below does not correctly answer the question.
+        instruction = f"""
+Fix SQL to correctly answer the question.
 
 Question:
 {question}
 
-SQL:
-{sql}
-
-Fix the SQL so it fully and precisely answers the question.
-Do NOT change table or column names unless needed.
-Do NOT hallucinate new tables.
-
-Return ONLY repaired SQL.
+Rules:
+ - No hallucinated tables or columns
+ - Use correct join keys
+ - Ensure correct aggregation and grain
+ - Maintain strict schema correctness
 """
-
+        prompt = build_repair_prompt(sql, diagnostics, instruction)
         return await llm.openai.acomplete(prompt, temperature=0)

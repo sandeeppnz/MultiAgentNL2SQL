@@ -1,6 +1,7 @@
 # core/agent.py
 
 import asyncio
+import re
 from core.config import settings
 from core.schema_graph.schema_loader import SchemaLoader
 from core.schema_graph.schema_graph import SchemaGraph
@@ -29,6 +30,8 @@ from agents.repair_agents import (
 )
 
 from core.confidence.fusion_confidence import FusionConfidenceAgent
+from core.token_reducer.reducer import TokenReducer
+
 
 
 class NL2SQLOrchestrator:
@@ -41,6 +44,8 @@ class NL2SQLOrchestrator:
     - confidence scoring
     """
 
+
+
     def __init__(self):
         # ----------------------------
         # schema setup
@@ -50,23 +55,30 @@ class NL2SQLOrchestrator:
 
         self.graph = SchemaGraph(self.schema)
         self.path = PathResolver(self.graph)
-
+        self.token_reducer = TokenReducer(use_llm=True)
         # ----------------------------
         # selector agents
         # ----------------------------
         semantic_selector = SemanticSelectorAgent()
         heuristic_selector = HeuristicSelectorAgent()
         graph_selector = GraphSelectorAgent()
+
+        from agents.selector_agents import ColumnSelectorAgent
+        column_selector = ColumnSelectorAgent()
+
         fusion_selector = FusionSelectorAgent(
             semantic=semantic_selector,
             heuristic=heuristic_selector,
             graph=graph_selector,
+            column_sel=column_selector
+
         )
 
         self.selector_agents = [
             semantic_selector,
             heuristic_selector,
             graph_selector,
+            column_selector,  
             fusion_selector,
         ]
 
@@ -216,21 +228,41 @@ class NL2SQLOrchestrator:
     # Repair Loop
     # ============================================================
 
-    async def _repair_sql(self, question: str, sql: str):
+    async def _repair_sql(self, question: str, sql: str, context: dict):
+        """
+        Repairs SQL using all repair agents.
+        Now passes full diagnostics including:
+            - tables
+            - columns
+            - roles
+            - join_paths
+            - schema_text
+            - summary
+        """
+
         diagnostics = {
             "question": question,
-            "schema_text": context.get("schema_text")
+            "schema_text": context.get("schema_text", ""),
+            "summary": context.get("summary", ""),
+            "tables": context.get("tables", []),
+            "columns": context.get("columns", {}),
+            "roles": context.get("role_map", {}),
+            "join_paths": context.get("join_paths", "")
         }
 
         repaired = []
+
         for agent in self.repair_agents:
             try:
                 fixed = await agent.repair(sql, diagnostics)
-                repaired.append(fixed)
+                if fixed and isinstance(fixed, str):
+                    repaired.append(fixed)
             except Exception:
+                # DON’T crash orchestrator — continue repairing
                 pass
 
         return repaired
+
 
     # ============================================================
     # Confidence Scoring
@@ -238,6 +270,103 @@ class NL2SQLOrchestrator:
 
     async def _score_sql(self, question: str, sql: str):
         return await self.confidence.score(question, sql)
+
+
+
+    import re
+
+   
+    def _canonicalize_sql(self, sql: str, reorder_columns=True) -> str:
+        if not sql:
+            return ""
+
+        # ---------------------------
+        # Remove markdown formatting
+        # ---------------------------
+        sql = sql.replace("```sql", "").replace("```", "")
+
+        # ---------------------------
+        # Normalize whitespace
+        # ---------------------------
+        sql = sql.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+        sql = " ".join(sql.split())
+
+        # ----------------------------------
+        # Uppercase SQL keywords
+        # ----------------------------------
+        SQL_KEYWORDS = [
+            "select", "from", "where", "group by", "order by", "join", "left join",
+            "right join", "inner join", "outer join", "on", "and", "or", "between",
+            "as", "limit", "offset", "having"
+        ]
+
+        for kw in sorted(SQL_KEYWORDS, key=len, reverse=True):
+            pattern = re.compile(rf"\b{kw}\b", re.IGNORECASE)
+            sql = pattern.sub(kw.upper(), sql)
+
+        # ----------------------------------
+        # Normalize table aliases:
+        #   - remove "AS"
+        #   - ensure alias is lowercase
+        # ----------------------------------
+        def alias_replacer(match):
+            table = match.group(1)
+            alias = match.group(2).lower()
+            return f"{table} {alias}"
+
+        sql = re.sub(r"(\b[A-Za-z0-9_]+\b)\s+AS\s+([A-Za-z0-9_]+)", alias_replacer, sql, flags=re.IGNORECASE)
+
+        # ----------------------------------
+        # Optional: reorder SELECT columns
+        # ----------------------------------
+        if reorder_columns:
+            m = re.match(r"SELECT (.+?) FROM (.+)", sql, flags=re.IGNORECASE)
+            if m:
+                cols = m.group(1)
+                rest = m.group(2)
+
+                cols_list = [c.strip() for c in cols.split(",")]
+                cols_list.sort(key=str.lower)
+                sql = f"SELECT {', '.join(cols_list)} FROM {rest}"
+
+        # ----------------------------------
+        # Normalize JOIN order:
+        # Fact table first, dims later
+        # ----------------------------------
+        # Light heuristic: put Fact* tables first
+        tables = re.findall(r"\b(Fact[A-Za-z0-9_]+)\b|\b(Dim[A-Za-z0-9_]+)\b", sql)
+        # RESULT is a list of tuples like: [('FactInternetSales',''), ('','DimProduct')]
+
+        # You can extend this to reorder based on schema_graph if needed
+
+        # ----------------------------------
+        # Ensure final semicolon
+        # ----------------------------------
+        sql = sql.rstrip(";") + ";"
+
+        return sql.strip()
+
+
+
+    def _clean_sql(self, sql: str) -> str:
+        if not sql:
+            return ""
+
+        # Remove markdown fences
+        sql = sql.replace("```sql", "").replace("```", "")
+
+        # Remove newlines, tabs
+        sql = sql.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+
+        # Remove double spaces
+        sql = " ".join(sql.split())
+
+        # Ensure SQL ends with semicolon
+        if not sql.endswith(";"):
+            sql += ";"
+
+        return sql.strip()
+
 
     # ============================================================
     # MAIN PIPELINE
@@ -260,7 +389,9 @@ class NL2SQLOrchestrator:
             validation = await self._validate(question, sql)
 
             if not validation["valid"]:
-                repaired_list = await self._repair_sql(question, sql)
+                repaired_list = await self._repair_sql(
+                    question, sql, compressed_context
+                )
                 final_list = repaired_list
             else:
                 final_list = [sql]
@@ -273,9 +404,16 @@ class NL2SQLOrchestrator:
         # 4. pick best
         best = max(candidates, key=lambda x: x[0])
 
+        canonical_best = self._canonicalize_sql(best[1])
+        canonical_candidates = [
+            (score, self._canonicalize_sql(sql))
+            for score, sql in candidates
+        ]
+
         return {
-            "best_sql": best[1],
+            "best_sql": canonical_best,
             "best_score": best[0],
-            "all_candidates": candidates,
-            "selected_tables": tables
+            "selected_tables": tables,
+            "all_candidates": canonical_candidates
         }
+

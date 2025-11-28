@@ -1,18 +1,39 @@
 """
 Base agent interfaces for the multi-agent NL→SQL system.
-All specialized agents (generation, repair, selector, validator)
-will inherit from these base classes.
+All specialized agents inherit from these abstract base classes.
 """
 
 from abc import ABC, abstractmethod
 
-class BaseAgent(ABC):
-    """Parent class for all agents."""
 
-    @abstractmethod
+# -------------------------------------------------------------------
+# BaseAgent
+# -------------------------------------------------------------------
+
+class BaseAgent(ABC):
+    """
+    Master abstract class for all agent types.
+    Provides:
+      - name
+      - kind
+      - base async run wrapper
+    """
+
+    kind: str = "base"
+    name: str = "BaseAgent"
+
+    def __init__(self, name: str = None):
+        if name:
+            self.name = name
+
     async def run(self, *args, **kwargs):
-        """Run the agent logic asynchronously."""
-        pass
+        """
+        Default behavior — subclasses override.
+        If called directly, raise explicit error.
+        """
+        raise NotImplementedError(
+            f"Agent '{self.name}' must override run()"
+        )
 
 
 # -------------------------------------------------------------------
@@ -21,20 +42,18 @@ class BaseAgent(ABC):
 
 class BaseGenerationAgent(BaseAgent):
     """
-    SQL Generation Agents (G1–G5).
-    Each agent uses a different prompting strategy or LLM configuration.
+    SQL Generation Agents (G1–G7).
+    Implement:
+        async def generate(question, context) -> str
     """
+
+    kind = "generation"
 
     @abstractmethod
     async def generate(self, question: str, context: dict) -> str:
-        """
-        Generate SQL based on question + context (tables, schema, rules).
-        Must be implemented by each generation agent.
-        """
         pass
 
     async def run(self, question: str, context: dict):
-        """Uniform run() wrapper for all generation agents."""
         return await self.generate(question, context)
 
 
@@ -44,25 +63,18 @@ class BaseGenerationAgent(BaseAgent):
 
 class BaseRepairAgent(BaseAgent):
     """
-    SQL Repair Agents (R1–R7).
-    These agents take invalid SQL + diagnostics, and attempt to repair it.
-    Example:
-        - grammar fix
-        - join fix
-        - missing dim fix
-        - column rename fix
-        - GROUP BY fix
+    Repair agents (R1–R10).
+    Implement:
+        async def repair(sql, diagnostics) -> str
     """
+
+    kind = "repair"
 
     @abstractmethod
     async def repair(self, sql: str, diagnostics: dict) -> str:
-        """
-        Attempt to produce a corrected SQL string.
-        """
         pass
 
     async def run(self, sql: str, diagnostics: dict):
-        """Uniform run() wrapper for all repair agents."""
         return await self.repair(sql, diagnostics)
 
 
@@ -72,24 +84,22 @@ class BaseRepairAgent(BaseAgent):
 
 class BaseSelectorAgent(BaseAgent):
     """
-    Table selector agents (semantic, heuristic, graph-based).
-    Each agent returns:
+    Selector agents choose tables relevant to a question.
+    Return format:
         {
-          "tables": [...],
-          "score": float,
-          "source": "semantic" / "heuristic" / "graph"
+            "tables": [...],
+            "score": float,
+            "source": "semantic" | "heuristic" | "graph"
         }
     """
 
+    kind = "selector"
+
     @abstractmethod
     async def select(self, question: str, schema: dict) -> dict:
-        """
-        Return selected tables + score.
-        """
         pass
 
     async def run(self, question: str, schema: dict):
-        """Uniform run() wrapper for all selector agents."""
         return await self.select(question, schema)
 
 
@@ -99,26 +109,20 @@ class BaseSelectorAgent(BaseAgent):
 
 class BaseValidatorAgent(BaseAgent):
     """
-    Semantic intent validators.
-    These agents answer:
-        - Does this SQL answer the question?
-        - Is there a missing join?
-        - Is the grain correct?
-        - Should columns be grouped?
+    Validators determine if SQL answers the question.
+    Must return:
+        {
+            "valid": True/False,
+            "score": float,
+            "reason": "..."
+        }
     """
+
+    kind = "validator"
 
     @abstractmethod
     async def validate(self, question: str, sql: str) -> dict:
-        """
-        Return validation result:
-        {
-            "valid": True/False,
-            "reason": "...",
-            "score": float
-        }
-        """
         pass
 
     async def run(self, question: str, sql: str):
-        """Uniform run() wrapper for all validator agents."""
         return await self.validate(question, sql)

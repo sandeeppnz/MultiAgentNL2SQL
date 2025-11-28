@@ -3,26 +3,66 @@ Semantic SQL Validator Agents (V1–V4)
 Evaluates whether SQL answers the natural language question.
 """
 
+import re
+import json
+
 from agents.base import BaseValidatorAgent
 from llm.llm_manager import LLMManager
-from sqlglot import parse_one
-import re
+from core.prompt_builder import PromptBuilder
 
 llm = LLMManager()
+pb = PromptBuilder()
+
 
 # ============================================================
-# V1 — Cheap OpenAI Semantic Validator
+# UTIL — SAFE JSON EXTRACTOR
+# ============================================================
+
+def safe_extract_json(text: str):
+    """Attempts to extract JSON from an LLM response."""
+    if not text or not isinstance(text, str):
+        return None
+
+    text = text.strip()
+
+    # direct
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # substring
+    try:
+        start = text.index("{")
+        end = text.rindex("}") + 1
+        return json.loads(text[start:end])
+    except Exception:
+        return None
+
+
+# ============================================================
+# V1 — Cheap OpenAI Semantic Validator  (with PromptBuilder)
 # ============================================================
 
 class CheapOpenAIVerifierAgent(BaseValidatorAgent):
     """
-    Uses a cheap OpenAI model (e.g., gpt-4o-mini or gpt-4.1-mini)
-    to determine whether SQL answers the question.
+    Uses OpenAI mini models to validate SQL semantics.
+    Now supports context-aware validation via PromptBuilder.
     """
 
-    async def validate(self, question: str, sql: str) -> dict:
+    name = "V1-OpenAI-Semantic"
+
+    async def validate(self, question: str, sql: str, context: dict | None = None) -> dict:
+
+        schema_block = ""
+        if context:
+            # NEW — include light schema info
+            schema_block = pb.build_validation_prompt(question, sql, context)
+
         prompt = f"""
-You are a semantic SQL validator.
+You are a SQL semantic validator.
+
+{schema_block}
 
 Question:
 {question}
@@ -30,10 +70,9 @@ Question:
 SQL:
 {sql}
 
-Task:
-Evaluate if the SQL fully and correctly answers the question.
+Does the SQL fully and correctly answer the question?
 
-Respond ONLY in this JSON structure:
+Respond ONLY in this JSON format:
 {{
   "valid": true/false,
   "score": 0.0 to 1.0,
@@ -41,32 +80,57 @@ Respond ONLY in this JSON structure:
 }}
 """
 
-        result = await llm.openai.acomplete(prompt, temperature=0)
+        # safe call
+        try:
+            result = await llm.openai.acomplete(prompt, temperature=0)
+        except Exception as e:
+            return {
+                "valid": False,
+                "score": 0.1,
+                "reason": f"OpenAI exception: {e}"
+            }
 
-        # Fallback parsing (Option C scaffold = simple logic)
-        is_valid = "true" in result.lower()
-        score = 0.9 if is_valid else 0.2
+        if not result or not isinstance(result, str):
+            return {
+                "valid": False,
+                "score": 0.1,
+                "reason": "OpenAI returned invalid response"
+            }
+
+        # extract JSON
+        parsed = safe_extract_json(result)
+        if parsed:
+            return {
+                "valid": parsed.get("valid", False),
+                "score": float(parsed.get("score", 0.1)),
+                "reason": parsed.get("reason", result)
+            }
+
+        # fallback
+        lowered = result.lower().strip()
+        is_valid = lowered.startswith("true") or lowered.startswith("yes")
 
         return {
             "valid": is_valid,
-            "score": score,
-            "reason": result
+            "score": 0.8 if is_valid else 0.2,
+            "reason": "Fallback parse: " + result[:200]
         }
 
 
 # ============================================================
-# V2 — Local SLM Validator (Ollama)
+# V2 — Local SLM Validator (no prompt builder)
 # ============================================================
 
 class LocalSLMValidatorAgent(BaseValidatorAgent):
     """
-    Local SLM semantic validation.
-    Very fast, offline, cheap.
+    Fast offline validator powered by local SLM (Ollama).
     """
+
+    name = "V2-SLM-Semantic"
 
     async def validate(self, question: str, sql: str) -> dict:
         prompt = f"""
-Determine if this SQL answers the question.
+Does this SQL answer the question?
 
 Question:
 {question}
@@ -74,11 +138,26 @@ Question:
 SQL:
 {sql}
 
-Answer with: yes or no, and a short reason.
+Respond only: yes or no, then a short explanation.
 """
 
-        result = await llm.ollama.acomplete(prompt)
-        is_yes = "yes" in result.lower()
+        try:
+            result = await llm.ollama.acomplete(prompt)
+        except Exception as e:
+            return {
+                "valid": False,
+                "score": 0.2,
+                "reason": f"Ollama exception: {e}"
+            }
+
+        if not result or not isinstance(result, str):
+            return {
+                "valid": False,
+                "score": 0.2,
+                "reason": "Ollama returned invalid response"
+            }
+
+        is_yes = result.lower().strip().startswith("yes")
 
         return {
             "valid": is_yes,
@@ -88,80 +167,85 @@ Answer with: yes or no, and a short reason.
 
 
 # ============================================================
-# V3 — Structural Intent Validator (Rule-Based)
+# V3 — Structural Intent Validator (pure rules)
 # ============================================================
 
 class StructuralIntentValidator(BaseValidatorAgent):
     """
-    Deterministic rule-based validation.
-    No LLM used.
-    Checks:
-    - missing WHERE for time range
-    - missing GROUP BY when using aggregates
-    - missing JOINs for referenced columns
+    Static rule-based validator:
+      - ensures DimDate usage for date queries
+      - ensures GROUP BY is present when needed
+      - ensures fact tables appear for sales queries
     """
 
-    async def validate(self, question: str, sql: str) -> dict:
+    name = "V3-RuleBased"
 
+    async def validate(self, question: str, sql: str) -> dict:
         errors = []
         q = question.lower()
         s = sql.lower()
 
-        # rule 1: if year mentioned → expect WHERE or JOIN DimDate
-        if "year" in q and ("dimdate" not in s and "calendar" not in s):
-            errors.append("Question refers to year but SQL not using DimDate.")
+        # rule 1: date dimension required
+        if "year" in q or "month" in q or "date" in q:
+            if "dimdate" not in s and "calendar" not in s:
+                errors.append("Missing DimDate join for date-based question.")
 
-        # rule 2: aggregates without GROUP BY
+        # rule 2: aggregates vs group by
         if re.search(r"(count|sum|avg|min|max)\(", s) and "group by" not in s:
-            # Some questions want total only; we skip if no dimension selected
-            if "total" not in q and "overall" not in q:
-                errors.append("SQL uses aggregates without GROUP BY.")
+            if "total" not in q:
+                errors.append("Aggregate used without GROUP BY for dimensional question.")
 
-        # rule 3: fact table check
+        # rule 3: fact table requirement
         if "sales" in q and "fact" not in s:
-            errors.append("Sales question should reference a fact table.")
+            errors.append("Sales question should reference Fact* table.")
+
+        valid = (len(errors) == 0)
+        score = 1.0 if valid else 0.1
 
         return {
-            "valid": len(errors) == 0,
-            "score": 1.0 if len(errors) == 0 else 0.1,
+            "valid": valid,
+            "score": score,
             "reason": "; ".join(errors) if errors else "OK"
         }
 
 
 # ============================================================
-# V4 — Fusion Semantic Validator
+# V4 — Fusion Validator
 # ============================================================
 
 class FusionValidatorAgent(BaseValidatorAgent):
     """
     Combines:
-      - Cheap OpenAI semantic reasoning
-      - Local SLM semantic reasoning
-      - Structural rule checks
-
-    Produces a final, robust semantic score.
+      - V1 OpenAI semantic reasoning (context-aware)
+      - V2 Local SLM semantic reasoning
+      - V3 structural reasoning
     """
+
+    name = "V4-Fusion"
 
     def __init__(self):
         self.openai = CheapOpenAIVerifierAgent()
         self.slm = LocalSLMValidatorAgent()
         self.struct = StructuralIntentValidator()
 
-    async def validate(self, question: str, sql: str) -> dict:
-        v1 = await self.openai.validate(question, sql)
+    async def validate(self, question: str, sql: str, context: dict | None = None) -> dict:
+        v1 = await self.openai.validate(question, sql, context=context)
         v2 = await self.slm.validate(question, sql)
         v3 = await self.struct.validate(question, sql)
 
-        # Weighted fusion
         score = (
             0.50 * v1["score"] +
             0.30 * v2["score"] +
             0.20 * v3["score"]
         )
 
-        valid = score > 0.55
+        valid = score >= 0.55
 
-        reason = f"OpenAI: {v1['reason']}\nSLM: {v2['reason']}\nStruct: {v3['reason']}"
+        reason = (
+            f"OpenAI: {v1['reason']}\n"
+            f"SLM: {v2['reason']}\n"
+            f"Struct: {v3['reason']}"
+        )
 
         return {
             "valid": valid,
