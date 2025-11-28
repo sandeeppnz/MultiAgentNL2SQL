@@ -272,9 +272,6 @@ class NL2SQLOrchestrator:
         return await self.confidence.score(question, sql)
 
 
-
-    import re
-
    
     def _canonicalize_sql(self, sql: str, reorder_columns=True) -> str:
         if not sql:
@@ -346,26 +343,6 @@ class NL2SQLOrchestrator:
 
         return sql.strip()
 
-
-
-    def _clean_sql(self, sql: str) -> str:
-        if not sql:
-            return ""
-
-        # Remove markdown fences
-        sql = sql.replace("```sql", "").replace("```", "")
-
-        # Remove newlines, tabs
-        sql = sql.replace("\n", " ").replace("\r", " ").replace("\t", " ")
-
-        # Remove double spaces
-        sql = " ".join(sql.split())
-
-        # Ensure SQL ends with semicolon
-        if not sql.endswith(";"):
-            sql += ";"
-
-        return sql.strip()
 
 
     # ============================================================

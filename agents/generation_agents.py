@@ -16,7 +16,7 @@ builder = PromptBuilder()
 # ============================================================
 
 def build_prompt(question: str, context: dict, mode: str):
-    return builder.build(question, context, mode=mode)
+    return builder.build_sql_prompt(question, context, mode=mode)
 
 
 # ============================================================

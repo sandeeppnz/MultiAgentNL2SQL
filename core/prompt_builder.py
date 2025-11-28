@@ -1,224 +1,232 @@
-# core/sql_generation/prompt_builder.py
+# core/prompt_builder.py
 
 """
-Centralized Prompt Builder for ALL SQL Generation Agents.
+Fast-Mode Prompt Builder
+=========================
 
-This module standardizes:
- - schema formatting
- - join-path reasoning
- - table/column summaries
- - fact/dimension roles
- - guardrails
- - prompt modes (canonical, compact, join_heavy)
- - injection of compressed context from TokenReducer
+This version is optimized for SPEED:
 
-Every SQL generation agent should call:
+ - minimal schema footprint
+ - compressed join-paths
+ - no verbose PK/FK dumps
+ - no long schema blocks
+ - unified formatting for:
+      • generation prompts
+      • validation prompts
+      • repair prompts
+ - all prompts < 2,000 tokens
 
-    prompt = PromptBuilder().build(question, context, mode="canonical")
-
-Then feed that prompt directly into LLM.
+Supports:
+   build_sql_prompt(question, context, mode="canonical")
+   build_validation_prompt(question, sql, context)
+   build_repair_prompt(question, sql, diagnostics)
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 class PromptBuilder:
 
     # ============================================================
-    # MAIN ENTRY
+    # PUBLIC ENTRY 1 — SQL GENERATION
     # ============================================================
 
-    def build(self, question: str, context: dict, mode: str = "canonical") -> str:
+    def build_sql_prompt(self, question: str, context: dict, mode: str = "canonical") -> str:
         """
-        Construct a fully schema-aware SQL generation prompt.
-        Modes:
-            - canonical  → verbose, safe, structured, best accuracy
-            - compact    → minimal token usage
-            - join_heavy → emphasise FK/PK correctness
+        Fast-mode SQL generation prompt.
+        Designed for OpenAI mini models and deterministic generators.
         """
 
         tables = context.get("tables", [])
         columns = context.get("columns", {})
         roles = context.get("role_map", {})
         join_paths = context.get("join_paths", "")
-        summary = context.get("summary", "")
-        schema_text = context.get("schema_text", "")
 
-        # ---- structured components ----
-        table_block = self._format_tables(tables)
-        column_block = self._format_columns(columns)
-        role_block = self._format_roles(roles)
-        join_block = self._format_join_paths(join_paths)
-        schema_block = self._format_full_schema(schema_text)
-        summary_block = self._format_summary(summary)
-
-        # ---- guardrails ----
-        guardrails = self._guardrails()
-
-        # ---- Build mode-specific instructions ----
-        mode_instructions = self._mode_instructions(mode)
-
-        # ----------------------------------------------------------------
-        # FINAL PROMPT (unified structure used by ALL generation agents)
-        # ----------------------------------------------------------------
-        prompt = f"""
+        return f"""
 You are an expert SQL Server T-SQL generator.
-You must follow the schema and join rules EXACTLY.
-Never hallucinate tables or columns. Never invent join keys.
+You MUST follow the schema exactly.
+Never hallucinate tables, columns, or join keys.
 
-# ========================
-# QUESTION
-# ========================
+QUESTION:
 {question}
 
-# ========================
-# MODE
-# ========================
-{mode.upper()}
+MODE: {mode.upper()}
 
-# ========================
-# TABLES
-# ========================
-{table_block}
+TABLES:
+{self._fmt_tables(tables)}
 
-# ========================
-# COLUMNS
-# ========================
-{column_block}
+COLUMNS (compressed):
+{self._fmt_columns(columns)}
 
-# ========================
-# ROLES (Fact / Dimension)
-# ========================
-{role_block}
+ROLES (Fact/Dim):
+{self._fmt_roles(roles)}
 
-# ========================
-# JOIN PATHS (Compressed)
-# ========================
-{join_block}
+JOIN PATHS:
+{self._fmt_join_paths(join_paths)}
 
-# ========================
-# COMPRESSED SCHEMA SUMMARY
-# ========================
-{summary_block}
+RULES:
+{self._generation_rules(mode)}
 
-# ========================
-# FULL SCHEMA (Compressed)
-# ========================
-{schema_block}
+Return ONLY the final SQL.
+""".strip()
 
-# ========================
-# GENERATION RULES
-# ========================
-{guardrails}
-
-# ========================
-# MODE INSTRUCTIONS
-# ========================
-{mode_instructions}
-
-Return ONLY the final SQL. No explanation. No commentary.
-"""
-
-        print(prompt)
-        return prompt.strip()
 
     # ============================================================
-    # BUILDING BLOCKS
+    # PUBLIC ENTRY 2 — VALIDATION PROMPT
     # ============================================================
 
-    def _format_tables(self, tables: List[str]) -> str:
+    def build_validation_prompt(self, question: str, sql: str, context: dict) -> str:
+        """
+        Lightweight validation prompt.
+        Used by CheapOpenAIVerifierAgent (V1).
+        """
+
+        tables = context.get("tables", [])
+        join_paths = context.get("join_paths", "")
+
+        return f"""
+# SQL Semantic Validation Context (FAST)
+
+Tables involved:
+{self._fmt_tables(tables)}
+
+Join paths:
+{self._fmt_join_paths(join_paths)}
+
+Validation Task:
+Determine whether the SQL below fully answers the QUESTION.
+
+QUESTION:
+{question}
+
+SQL:
+{sql}
+
+Respond ONLY with JSON:
+{{
+  "valid": true/false,
+  "score": 0.0 to 1.0,
+  "reason": "..."
+}}
+""".strip()
+
+
+    # ============================================================
+    # PUBLIC ENTRY 3 — REPAIR PROMPT
+    # ============================================================
+
+    def build_repair_prompt(self, question: str, sql: str, diagnostics: dict) -> str:
+        """
+        Fast-mode repair prompt (OpenAI).
+        """
+
+        schema_text = diagnostics.get("schema_text", "")
+        # Keep schema light—ONLY include join paths or one-liners
+        schema_short = self._shorten_schema(schema_text)
+
+        return f"""
+You are an expert SQL repair assistant.
+
+QUESTION:
+{question}
+
+BROKEN SQL:
+{sql}
+
+SCHEMA (compressed):
+{schema_short}
+
+Fix the SQL so that:
+- it is valid T-SQL
+- uses correct tables and join paths
+- answers the question EXACTLY
+- no hallucinated columns
+- no invented tables
+
+Return ONLY the repaired SQL.
+""".strip()
+
+
+    # ============================================================
+    # INTERNAL HELPERS
+    # ============================================================
+
+    def _fmt_tables(self, tables: List[str]) -> str:
         if not tables:
-            return "(No tables selected — provide best guess)"
+            return "(none)"
         return "\n".join(f"- {t}" for t in tables)
 
-    def _format_columns(self, columns: Dict[str, List[str]]) -> str:
+    def _fmt_columns(self, columns: Dict[str, List[str]]) -> str:
         if not columns:
-            return "(No columns)"
+            return "(none)"
+        return "\n".join(f"{tbl}: {', '.join(cols)}" for tbl, cols in columns.items())
 
-        return "\n".join(
-            f"{tbl}: {', '.join(cols)}"
-            for tbl, cols in columns.items()
-        )
-
-    def _format_roles(self, roles: Dict[str, str]) -> str:
+    def _fmt_roles(self, roles: Dict[str, str]) -> str:
         if not roles:
-            return "(No roles detected)"
-
+            return "(none)"
         return "\n".join(f"{tbl}: {role}" for tbl, role in roles.items())
 
-    def _format_join_paths(self, join_paths: str) -> str:
-        if not join_paths.strip():
-            return "(No join paths available)"
-        return join_paths
+    def _fmt_join_paths(self, jp: str) -> str:
+        if not jp.strip():
+            return "(none)"
 
-    def _format_full_schema(self, schema_text: str) -> str:
-        if not schema_text.strip():
-            return "(No schema)"
-        return schema_text
+        lines = [
+            ln.strip()
+            for ln in jp.split("\n")
+            if ln.strip()
+        ]
 
-    def _format_summary(self, summary: str) -> str:
-        if not summary:
-            return "(No LLM summary)"
-        return summary
+        # Flatten into compact, readable lines
+        return "\n".join(lines[:12])  # hard cap
 
-    # ============================================================
-    # GUARDRAILS
-    # ============================================================
+    def _shorten_schema(self, schema_text: str) -> str:
+        """ Compress schema for repair prompts """
+        if not schema_text:
+            return "(none)"
 
-    def _guardrails(self) -> str:
-        return """
-- Only use tables listed above.
-- Only use columns listed under each table.
-- DO NOT invent or hallucinate tables, columns, or join keys.
+        lines = schema_text.split("\n")
+
+        # include only PK/FK and columns header lines
+        out = []
+        for ln in lines:
+            ln = ln.strip()
+            if "Columns" in ln or "PK" in ln or "FK" in ln:
+                out.append(ln[:140] + (" ..." if len(ln) > 140 else ""))
+
+        return "\n".join(out[:20])  # keep max 20 lines
+
+    def _generation_rules(self, mode: str) -> str:
+        mode = mode.lower()
+
+        base_rules = """
+- Use ONLY the listed tables/columns.
+- No hallucinated names.
 - ALWAYS use explicit JOIN ... ON.
-- ALWAYS use correct FK → PK join conditions from JOIN PATHS.
-- Use table aliases (a, b, c, ...).
-- Use SQL Server (T-SQL) syntax only.
-- If aggregation is used, include GROUP BY for all non-aggregated columns.
-- Prefer canonical formatting with each SELECT column on a new line.
-- Always reference DimDate for date filters.
-- Never guess column names — use only provided columns.
-"""
-
-    # ============================================================
-    # MODE-SPECIFIC INSTRUCTIONS
-    # ============================================================
-
-    def _mode_instructions(self, mode: str) -> str:
-        mode = mode.lower().strip()
-
-        if mode == "canonical":
-            return """
-Canonical SQL Mode:
-- Use clean canonical formatting.
-- SELECT columns each on their own line.
-- Explicit JOIN chaining.
-- Full qualification of columns (alias.column).
-- Strict fact→dimension join correctness.
+- FK→PK joins must follow JOIN PATHS.
+- Use table aliases: a, b, c...
+- Include GROUP BY for all non-aggregated columns.
+- Use valid SQL Server T-SQL syntax only.
 """
 
         if mode == "compact":
-            return """
-Compact SQL Mode:
-- Minimize tokens.
-- No comments.
+            return base_rules + """
+- Minimize whitespace.
 - Use short aliases.
-- Use minimal whitespace.
-- Keep SQL fully valid and correct.
+- Keep SQL very compact.
 """
 
         if mode == "join_heavy":
-            return """
-Join-Heavy Mode:
-- Prioritize correct FK/PK joins.
-- Include ALL needed dimension joins.
-- Do NOT simplify join chains.
-- Always rely on JOIN PATHS.
+            return base_rules + """
+- Emphasize ALL required joins.
+- Do NOT remove dimension joins.
+- Fully chain FK→PK joins.
 """
 
-        # fallback (canonical)
-        return """
-Canonical SQL Mode (default):
-- Clean formatting, explicit JOINs, strict correctness.
+        # Default = canonical
+        return base_rules + """
+- Clean canonical formatting.
+- One SELECT column per line.
+- Fully qualify: alias.column.
 """
+
 

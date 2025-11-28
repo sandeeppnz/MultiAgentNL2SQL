@@ -48,7 +48,7 @@ def build_repair_prompt(sql: str, diagnostics: dict, instruction: str) -> str:
     }
 
     # Inject repair-specific instruction
-    base_prompt = builder.build(question, context, mode="canonical")
+    base_prompt = builder.build_repair_prompt(question, context, diagnostics)
 
     return f"""
 {base_prompt}
