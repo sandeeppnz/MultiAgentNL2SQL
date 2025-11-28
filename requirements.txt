@@ -35,5 +35,8 @@ cachetools==5.4.0
 # --- Optional Logging & Tracing ---
 loguru==0.7.2
 
+# --- Environment loading ---
+python-dotenv==1.0.1
+
 # --- Ollama client compatibility (optional) ---
 ollama==0.1.8
