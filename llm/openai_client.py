@@ -5,11 +5,11 @@ import json
 from core.config import settings
 
 class OpenAIClient:
-    def __init__(self, model: str = "gpt-4.1-mini", timeout: int = 30):
+    def __init__(self, model: str | None = None, timeout: int = 30):
         self.api_key = settings.OPENAI_API_KEY
         base = settings.OPENAI_API_BASE or "https://api.openai.com/v1"
         self.url = f"{base.rstrip('/')}/chat/completions"
-        self.model = model
+        self.model = model or settings.OPENAI_MODEL
         self.timeout = timeout
 
     async def acomplete(self, prompt: str, temperature: float = 0.0):
