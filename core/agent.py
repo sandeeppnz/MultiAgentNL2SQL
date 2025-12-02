@@ -3,6 +3,7 @@
 import asyncio
 import re
 from core.config import settings
+from core.db.db_executor import DBExecutor
 from core.schema_graph.schema_loader import SchemaLoader
 from core.schema_graph.schema_graph import SchemaGraph
 from core.schema_graph.path_resolver import PathResolver
@@ -34,6 +35,7 @@ from core.token_reducer.reducer import TokenReducer
 
 
 
+
 class NL2SQLOrchestrator:
     """
     The central controller that runs:
@@ -56,6 +58,8 @@ class NL2SQLOrchestrator:
         self.graph = SchemaGraph(self.schema)
         self.path = PathResolver(self.graph)
         self.token_reducer = TokenReducer(use_llm=True)
+        self.db = DBExecutor(timeout=20, row_limit=500)
+
         # ----------------------------
         # selector agents
         # ----------------------------
@@ -394,3 +398,10 @@ class NL2SQLOrchestrator:
             "all_candidates": canonical_candidates
         }
 
+
+
+    async def execute_sql(self, best_sql: str):
+        try:
+            return await self.db.execute(best_sql)
+        except Exception as e:
+            return {"error": str(e)}
