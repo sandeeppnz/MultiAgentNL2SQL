@@ -34,5 +34,4 @@ async def generate_sql(payload: NLQRequest):
         selected_tables=result["tables"],
         candidates=[(1.0, result["sql"])],
         execution_result=execution   
-
     )
