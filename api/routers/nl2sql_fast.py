@@ -8,8 +8,8 @@ router = APIRouter()
 fast_orch = FastNL2SQLOrchestrator()
 
 
-@router.post("/fast", response_model=NLQResponse)
-async def fast_generate(payload: NLQRequest):
+@router.post("/generate_sql_fast", response_model=NLQResponse)
+async def generate_sql(payload: NLQRequest):
     result = await fast_orch.run(payload.question)
 
     return NLQResponse(
