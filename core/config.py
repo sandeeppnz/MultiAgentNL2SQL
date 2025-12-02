@@ -17,7 +17,9 @@ class settings:
     # ============================================================
     USE_SLM_REPAIR = flag("USE_SLM_REPAIR", False)
     ENABLE_SLM_GENERATORS = flag("ENABLE_SLM_GENERATORS", False)
+    EXECUTE_SQL = flag("EXECUTE_SQL", False)
 
+    
     # ============================================================
     # OpenAI Configuration
     # ============================================================
