@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException
 from api.models.nlq_request import NLQRequest
 from api.models.nlq_response import NLQResponse
 
+from api.routers.nl2sql_ultrafast import db
 from core.agent import NL2SQLOrchestrator
 from core.config import settings
 from core.db.db_executor import DBExecutionError
@@ -20,7 +21,7 @@ async def generate_sql(payload: NLQRequest):
     execution = None
     if settings.EXECUTE_SQL:
         try:
-            best_sql = result["sql"]
+            best_sql = result["best_sql"]
             execution = await db.execute(best_sql)
         except DBExecutionError as e:
             raise HTTPException(status_code=400, detail=f"SQL execution failed: {str(e)}")
