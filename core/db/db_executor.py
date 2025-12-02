@@ -3,7 +3,6 @@
 import asyncio
 import pandas as pd
 from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError
 
 from core.db.db_safety import is_safe_sql
 from core.db.db_results import normalize_results
